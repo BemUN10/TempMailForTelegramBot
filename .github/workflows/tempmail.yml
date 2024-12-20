@@ -1,7 +1,7 @@
 name: Temp Mail Bot Trigger
 
 on:
-  workflow_dispatch: # You can trigger it manually or set it to run on specific events
+  workflow_dispatch:  # Trigger manually or on specific events
 
 jobs:
   create_temp_email:
@@ -11,37 +11,75 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v2
 
-    - name: Fetch temporary email address
+    - name: Fetch temporary email address from Guerrilla Mail
       run: |
         echo "Fetching temp email address..."
-        
-        # Fetch the temp email API response
-        RESPONSE=$(curl -s https://api.mail.tm/accounts)
-        
-        # Print the raw response for debugging
-        echo "API Response: $RESPONSE"
 
-        # Try to parse the response with jq
-        EMAIL=$(echo $RESPONSE | jq -r '.address')
-        PASSWORD=$(echo $RESPONSE | jq -r '.password')
+        # Fetch temporary email address using Guerrilla Mail API
+        RESPONSE=$(curl -s "https://api.guerrillamail.com/ajax.php?f=get_email_address")
 
-        # If parsing fails, provide error messages
-        if [ -z "$EMAIL" ] || [ -z "$PASSWORD" ]; then
-          echo "Error: Failed to parse the email or password"
-          exit 1
-        fi
+        # Extract the email address from the JSON response
+        EMAIL=$(echo $RESPONSE | jq -r '.email_addr')
+        # Generate a random password for the temporary email (simple example)
+        PASSWORD="password$(date +%s)"
 
-        echo "Email: $EMAIL"
-        echo "Password: $PASSWORD"
+        echo "Generated Email: $EMAIL"
+        echo "Generated Password: $PASSWORD"
 
-        # Save to file for later use
+        # Save email and password to files
         echo $EMAIL > email.txt
         echo $PASSWORD > password.txt
 
-        # Send it to Telegram (adjust as needed)
+        # Send it to Telegram (replace <Your Telegram Bot Token> and <Your Chat ID>)
         TELEGRAM_TOKEN=<Your Telegram Bot Token>
         CHAT_ID=<Your Telegram Chat ID>
 
         curl -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" \
             -d "chat_id=$CHAT_ID" \
             -d "text=Temp Mail Created:\nEmail: $EMAIL\nPassword: $PASSWORD"
+
+    - name: Check for new emails until 100 messages received
+      run: |
+        echo "Checking for new emails until 100 messages are received..."
+
+        # Get current time in seconds
+        start_time=$(date +%s)
+
+        # Initialize counter for received emails
+        email_count=0
+
+        # Loop to check for new emails until 100 emails are received
+        while [ $email_count -lt 100 ]; do
+          echo "Checking for new emails..."
+
+          # Check for emails in the Guerrilla Mail inbox
+          MESSAGES_RESPONSE=$(curl -s "https://api.guerrillamail.com/ajax.php?f=get_email_messages&email_address=$EMAIL")
+
+          # Get the number of messages in the inbox
+          MESSAGE_COUNT=$(echo $MESSAGES_RESPONSE | jq '.messages | length')
+
+          if [ "$MESSAGE_COUNT" -gt 0 ]; then
+            # For each new email, send it to Telegram and increment the email count
+            for i in $(seq 0 $(($MESSAGE_COUNT - 1))); do
+              SUBJECT=$(echo $MESSAGES_RESPONSE | jq -r ".messages[$i].subject")
+              BODY=$(echo $MESSAGES_RESPONSE | jq -r ".messages[$i].body")
+
+              echo "New email received. Sending to Telegram..."
+              curl -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" \
+                -d "chat_id=$CHAT_ID" \
+                -d "text=New Email Received:\nSubject: $SUBJECT\nBody: $BODY"
+              ((email_count++))
+
+              # Stop once 100 messages have been processed
+              if [ $email_count -ge 100 ]; then
+                echo "100 emails received. Stopping the workflow."
+                break
+              fi
+            done
+          else
+            echo "No new emails."
+          fi
+
+          # Wait 60 seconds before checking again
+          sleep 60
+        done
