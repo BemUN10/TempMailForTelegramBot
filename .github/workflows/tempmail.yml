@@ -11,28 +11,37 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v2
 
-    - name: Get temporary email and password
+    - name: Fetch temporary email address
       run: |
         echo "Fetching temp email address..."
-        EMAIL=$(curl -s https://api.mail.tm/accounts)
-        PASSWORD=$(echo $EMAIL | jq -r '.password')
-        EMAIL_ADDRESS=$(echo $EMAIL | jq -r '.address')
+        
+        # Fetch the temp email API response
+        RESPONSE=$(curl -s https://api.mail.tm/accounts)
+        
+        # Print the raw response for debugging
+        echo "API Response: $RESPONSE"
 
-        echo "Email: $EMAIL_ADDRESS"
+        # Try to parse the response with jq
+        EMAIL=$(echo $RESPONSE | jq -r '.address')
+        PASSWORD=$(echo $RESPONSE | jq -r '.password')
+
+        # If parsing fails, provide error messages
+        if [ -z "$EMAIL" ] || [ -z "$PASSWORD" ]; then
+          echo "Error: Failed to parse the email or password"
+          exit 1
+        fi
+
+        echo "Email: $EMAIL"
         echo "Password: $PASSWORD"
 
-        # Save to file
-        echo $EMAIL_ADDRESS > email.txt
+        # Save to file for later use
+        echo $EMAIL > email.txt
         echo $PASSWORD > password.txt
 
-        # Trigger the Telegram Bot API to send this data
+        # Send it to Telegram (adjust as needed)
         TELEGRAM_TOKEN=<Your Telegram Bot Token>
         CHAT_ID=<Your Telegram Chat ID>
 
         curl -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" \
             -d "chat_id=$CHAT_ID" \
-            -d "text=Temp Mail Created:\nEmail: $EMAIL_ADDRESS\nPassword: $PASSWORD"
-
-    - name: Send the email and password to Telegram
-      run: |
-        curl -F "chat_id=$CHAT_ID" -F "text=Temp Mail Created: $(cat email.txt) - Password: $(cat password.txt)" "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage"
+            -d "text=Temp Mail Created:\nEmail: $EMAIL\nPassword: $PASSWORD"
